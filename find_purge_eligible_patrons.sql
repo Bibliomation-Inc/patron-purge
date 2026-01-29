@@ -33,75 +33,77 @@ patron_base AS (
     -- Find all patrons who are potentially eligible for purging
     -- Excludes already purged patrons and system accounts
     SELECT 
-        u.id AS patron_id,
-        u.home_ou,
-        u.expire_date,
-        o.shortname AS library_shortname
-    FROM actor.usr u
-    JOIN permission.grp_tree g ON u.profile = g.id
-    JOIN actor.org_unit o ON u.home_ou = o.id
-    WHERE u.deleted = FALSE
+        patron.id AS patron_id,
+        patron.home_ou,
+        patron.expire_date,
+        org_unit.shortname AS library_shortname
+    FROM actor.usr AS patron
+    JOIN permission.grp_tree AS perm_group ON patron.profile = perm_group.id
+    JOIN actor.org_unit AS org_unit ON patron.home_ou = org_unit.id
+    WHERE patron.deleted = FALSE
       -- Exclude already purged patrons
-      AND u.usrname NOT LIKE '%PURGED%'
-      AND u.first_given_name NOT LIKE '%PURGED%'
-      AND u.family_name NOT LIKE '%PURGED%'
+      AND patron.usrname NOT LIKE '%PURGED%'
+      AND patron.first_given_name NOT LIKE '%PURGED%'
+      AND patron.family_name NOT LIKE '%PURGED%'
       -- Only include patron-level permission groups (children of group 2)
-      AND g.parent = 2
+      AND perm_group.parent = 2
+      -- Exclude permission group with id 121 (PL Staff)
+      AND perm_group.id <> 121
 ),
 
 expired_patrons AS (
     -- Filter to patrons expired for longer than the threshold
     SELECT 
-        pb.patron_id,
-        pb.home_ou,
-        pb.expire_date,
-        pb.library_shortname
-    FROM patron_base pb
-    CROSS JOIN config c
-    WHERE pb.expire_date < (NOW() - c.expiration_threshold)
+        patron_base.patron_id,
+        patron_base.home_ou,
+        patron_base.expire_date,
+        patron_base.library_shortname
+    FROM patron_base
+    CROSS JOIN config
+    WHERE patron_base.expire_date < (NOW() - config.expiration_threshold)
 ),
 
 purge_eligible AS (
     -- Apply all purge criteria filters
     SELECT 
-        ep.patron_id,
-        ep.home_ou,
-        ep.expire_date,
-        ep.library_shortname
-    FROM expired_patrons ep
-    CROSS JOIN config c
+        expired_patrons.patron_id,
+        expired_patrons.home_ou,
+        expired_patrons.expire_date,
+        expired_patrons.library_shortname
+    FROM expired_patrons
+    CROSS JOIN config
     
     -- Criterion: No lost items (status = 3 is "Lost")
     WHERE NOT EXISTS (
         SELECT 1
-        FROM action.all_circulation ac
-        JOIN asset.copy cp ON cp.id = ac.target_copy
-        WHERE ac.usr = ep.patron_id
-          AND cp.status = 3
+        FROM action.all_circulation AS circulation
+        JOIN asset.copy AS item_copy ON item_copy.id = circulation.target_copy
+        WHERE circulation.usr = expired_patrons.patron_id
+          AND item_copy.status = 3
     )
     
     -- Criterion: No circulation activity within inactivity threshold
     AND NOT EXISTS (
         SELECT 1
-        FROM action.all_circulation ac
-        WHERE ac.usr = ep.patron_id
-          AND ac.xact_finish > (NOW() - c.inactivity_threshold)
+        FROM action.all_circulation AS circulation
+        WHERE circulation.usr = expired_patrons.patron_id
+          AND circulation.xact_finish > (NOW() - config.inactivity_threshold)
     )
     
     -- Criterion: No hold requests within inactivity threshold
     AND NOT EXISTS (
         SELECT 1
-        FROM action.hold_request hr
-        WHERE hr.usr = ep.patron_id
-          AND hr.request_time > (NOW() - c.inactivity_threshold)
+        FROM action.hold_request AS hold_request
+        WHERE hold_request.usr = expired_patrons.patron_id
+          AND hold_request.request_time > (NOW() - config.inactivity_threshold)
     )
     
     -- Criterion: No outstanding bills (open billable transactions)
     AND NOT EXISTS (
         SELECT 1
-        FROM money.billable_xact bx
-        WHERE bx.usr = ep.patron_id
-          AND bx.xact_finish IS NULL
+        FROM money.billable_xact AS billable_xact
+        WHERE billable_xact.usr = expired_patrons.patron_id
+          AND billable_xact.xact_finish IS NULL
     )
 )
 
@@ -111,11 +113,11 @@ purge_eligible AS (
 -- Returns all purge-eligible patrons with relevant details for review
 
 SELECT 
-    pe.patron_id,
-    pe.library_shortname,
-    pe.expire_date,
-    EXTRACT(YEAR FROM AGE(NOW(), pe.expire_date))::INT AS years_expired
-FROM purge_eligible pe
-ORDER BY pe.library_shortname, pe.expire_date;
+    purge_eligible.patron_id,
+    purge_eligible.library_shortname,
+    purge_eligible.expire_date,
+    EXTRACT(YEAR FROM AGE(NOW(), purge_eligible.expire_date))::INT AS years_expired
+FROM purge_eligible
+ORDER BY purge_eligible.library_shortname, purge_eligible.expire_date;
 
 ROLLBACK;
