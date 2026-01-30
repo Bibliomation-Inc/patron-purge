@@ -54,3 +54,4 @@ sub create_schema_if_not_exists {
     $sth->finish();
 }
 
+1; # End of Database.pm

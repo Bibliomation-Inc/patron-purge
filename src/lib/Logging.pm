@@ -210,3 +210,5 @@ sub _write_log {
         print $log_msg;
     }
 }
+
+1; # End of Logging.pm

@@ -45,3 +45,5 @@ sub get_database_configuration {
     
     return $db_config;
 }
+
+1; # End of Evergreen.pm

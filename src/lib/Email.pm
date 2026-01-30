@@ -37,3 +37,5 @@ sub send_email {
 
     sendmail($email);
 }
+
+1; # End of Email.pm
