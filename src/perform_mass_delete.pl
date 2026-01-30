@@ -19,7 +19,7 @@ use Try::Tiny;
 use Getopt::Long;
 use POSIX qw(strftime);
 
-use Config qw(load_config);
+use ConfigFile qw(load_config);
 use Database qw(setup_database_connection run_sql run_sql_file);
 use Email qw(send_email);
 use Evergreen;

@@ -1,4 +1,4 @@
-package Config;
+package ConfigFile;
 
 use strict;
 use warnings;
