@@ -88,6 +88,10 @@ sub run_sql_file {
     # These can appear anywhere in the file, not just at absolute start/end
     $sql =~ s/^\s*BEGIN\s*;\s*$//im;      # Remove standalone BEGIN; line
     $sql =~ s/^\s*(COMMIT|ROLLBACK)\s*;\s*$//im;  # Remove standalone COMMIT/ROLLBACK; line
+
+    # Strip comments
+    $sql =~ s/--.*$//mg;                   # Remove single-line comments
+    $sql =~ s{/\*.*?\*/}{}gs;              # Remove multi-line comments
     
     # Also remove any remaining whitespace-only lines at start/end
     $sql =~ s/^\s+//;
