@@ -48,8 +48,12 @@ sub run_sql {
     my $sth = $database_handle->prepare($sql);
     $sth->execute(@params);
     
+    # Check if this is a SELECT query by looking for SELECT as a standalone word
+    # This handles cases where SQL has leading comments
+    my $is_select = ($sql =~ /\bSELECT\b/i && $sql !~ /\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b/i);
+    
     # If it's a SELECT, return results as arrayref of hashrefs
-    if ($sql =~ /^\s*SELECT/i) {
+    if ($is_select) {
         my $results = $sth->fetchall_arrayref({});
         $sth->finish();
         return $results;
@@ -79,6 +83,15 @@ sub run_sql_file {
     open my $fh, '<', $file_path or die "Cannot open SQL file '$file_path': $!\n";
     my $sql = do { local $/; <$fh> };
     close $fh;
+    
+    # Strip transaction wrappers (BEGIN/COMMIT/ROLLBACK) that are meant for manual psql use
+    # These can appear anywhere in the file, not just at absolute start/end
+    $sql =~ s/^\s*BEGIN\s*;\s*$//im;      # Remove standalone BEGIN; line
+    $sql =~ s/^\s*(COMMIT|ROLLBACK)\s*;\s*$//im;  # Remove standalone COMMIT/ROLLBACK; line
+    
+    # Also remove any remaining whitespace-only lines at start/end
+    $sql =~ s/^\s+//;
+    $sql =~ s/\s+$//;
     
     return run_sql($sql, @params);
 }
