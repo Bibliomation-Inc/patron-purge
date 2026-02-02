@@ -1,3 +1,7 @@
+# ----------------------------------------------
+# ConfigFile.pm - A simple configuration file parser for Perl scripts
+# ----------------------------------------------
+
 package ConfigFile;
 
 use strict;
@@ -47,4 +51,4 @@ sub load_config {
     return \%config;
 }
 
-1;
+1; # End of ConfigFile.pm

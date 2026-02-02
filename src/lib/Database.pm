@@ -1,3 +1,7 @@
+# ----------------------------------------------
+# Database.pm - A simple database interaction module using DBI for PostgreSQL
+# ----------------------------------------------
+
 package Database;
 
 use strict;

@@ -1,3 +1,7 @@
+# ----------------------------------------------
+# Email.pm - A simple email sending module for Perl scripts
+# ----------------------------------------------
+
 package Email;
 
 use strict;

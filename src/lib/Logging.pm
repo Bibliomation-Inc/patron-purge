@@ -1,3 +1,7 @@
+# ----------------------------------------------
+# Logging.pm - A simple logging module for Perl scripts
+# ----------------------------------------------
+
 package Logging;
 
 use strict;
