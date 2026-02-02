@@ -34,14 +34,9 @@ sub load_config {
         next if $line =~ /^\s*$/;
         
         # Parse key = value (value can be quoted or unquoted)
-        if ($line =~ /^\s*(\w+)\s*=\s*"([^"]*)"\s*$/) {
-            $config{$1} = $2;
-        }
-        elsif ($line =~ /^\s*(\w+)\s*=\s*'([^']*)'\s*$/) {
-            $config{$1} = $2;
-        }
-        elsif ($line =~ /^\s*(\w+)\s*=\s*(\S+)\s*$/) {
-            $config{$1} = $2;
+        if ($line =~ /^\s*(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))\s*$/) {
+            my ($key, $val) = ($1, defined $2 ? $2 : defined $3 ? $3 : $4);
+            $config{$key} = $val;
         }
         else {
             die "Invalid configuration at line $line_num: $line\n";
