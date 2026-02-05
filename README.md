@@ -34,6 +34,7 @@ perform_mass_delete.pl [OPTIONS]
 | `--config=FILE` | Path to Evergreen opensrf.xml config file (default: `/openils/conf/opensrf.xml`) |
 | `--log=FILE` | Path to log file (default: STDOUT) |
 | `--dry-run` | Show what would be deleted without making changes |
+| `--quiet` | Suppress console output (for cron jobs) |
 | `--notify-conf=FILE` | Path to email notification config file |
 | `--email-to=ADDR` | Override email recipient from config |
 | `--help` | Show help message |
@@ -68,6 +69,7 @@ purge_deleted_patrons.pl [OPTIONS]
 | `--config=FILE` | Path to Evergreen opensrf.xml config file (default: `/openils/conf/opensrf.xml`) |
 | `--log=FILE` | Path to log file (default: STDOUT) |
 | `--dry-run` | Show what would be purged without making changes |
+| `--quiet` | Suppress console output (for cron jobs) |
 | `--dest-user=ID` | User ID to reassign data to (default: 1) |
 | `--notify-conf=FILE` | Path to email notification config file |
 | `--email-to=ADDR` | Override email recipient from config |
@@ -158,7 +160,7 @@ These modules are designed to be standalone and loosely coupled. They throw exce
 Example cron entry to run `purge_deleted_patrons.pl` weekly on Sunday at 2 AM:
 
 ```cron
-0 2 * * 0 /openils/bin/purge_deleted_patrons.pl --log=/var/log/patron_purge.log --notify-conf=/etc/patron_purge/notify.conf
+0 2 * * 0 /openils/bin/purge_deleted_patrons.pl --quiet --log=/var/log/patron_purge.log --notify-conf=/etc/patron_purge/notify.conf
 ```
 
 ## Requirements
