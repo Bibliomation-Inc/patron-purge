@@ -23,7 +23,7 @@ use ConfigFile qw(load_config);
 use Database qw(setup_database_connection run_sql run_sql_file);
 use Email qw(send_email);
 use Evergreen;
-use Logging qw(setup_logger log_message log_header DEBUG INFO WARN ERROR FATAL);
+use Logging qw(setup_logger configure_logger log_message log_header DEBUG INFO WARN ERROR FATAL);
 
 # ----------------------------------------------
 # Configuration - Defaults
@@ -33,6 +33,7 @@ my $notify_conf    = undef;
 my $config_file    = '/openils/conf/opensrf.xml';
 my $log_file       = undef;
 my $dry_run        = 0;
+my $quiet          = 0;
 my $help           = 0;
 
 # Email settings
@@ -46,6 +47,7 @@ GetOptions(
     'config=s'      => \$config_file,
     'log=s'         => \$log_file,
     'dry-run'       => \$dry_run,
+    'quiet'         => \$quiet,
     'email-to=s'    => \$email_to,
     'help'          => \$help,
 ) or die "Error in command line arguments\n";
@@ -64,6 +66,7 @@ load_notification_config();
 
 sub main {
     setup_logger($log_file) if defined $log_file;
+    configure_logger(console => 0) if $quiet;
     
     log_header(INFO, 'Mass Delete Started', 
         "Config: $config_file | Dry Run: " . ($dry_run ? 'Yes' : 'No'));
@@ -263,6 +266,7 @@ Options:
                         (default: /openils/conf/opensrf.xml)
     --log=FILE          Path to log file (default: STDOUT)
     --dry-run           Show what would be deleted without making changes
+    --quiet             Suppress console output (for cron jobs)
     --notify-conf=FILE  Path to email notification config file
     --email-to=ADDR     Override email recipient from config
     --help              Show this help message

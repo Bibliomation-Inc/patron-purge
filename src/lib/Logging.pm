@@ -9,7 +9,7 @@ use warnings;
 use POSIX qw/strftime/;
 use Exporter 'import';
 
-our @EXPORT_OK = qw(setup_logger log_message log_header DEBUG INFO WARN ERROR FATAL);
+our @EXPORT_OK = qw(setup_logger configure_logger log_message log_header DEBUG INFO WARN ERROR FATAL);
 
 use constant LINE_WIDTH => 120;
 use constant {
@@ -20,7 +20,20 @@ use constant {
     FATAL => 'FATAL',
 };
 
-my $log_file = undef;
+# Level priority for filtering (higher = more severe)
+my %LEVEL_PRIORITY = (
+    DEBUG => 1,
+    INFO  => 2,
+    WARN  => 3,
+    ERROR => 4,
+    FATAL => 5,
+);
+
+# Module-level configuration
+my $log_file          = undef;
+my $console_enabled   = 1;       # Output to console (default: on)
+my $file_log_level    = 'DEBUG'; # Minimum level for file logging
+my $console_log_level = 'INFO';  # Minimum level for console (DEBUG stays file-only)
 
 # ----------------------------------------------
 # setup_logger - Creates a log file if it doesn't exist and sets module log file
@@ -39,13 +52,42 @@ sub setup_logger {
 }
 
 # ----------------------------------------------
+# configure_logger - Configure logging behavior
+# Options:
+#   console       => 0/1 (enable/disable console output, default: 1)
+#   file_level    => 'DEBUG'|'INFO'|'WARN'|'ERROR'|'FATAL' (minimum level for file)
+#   console_level => 'DEBUG'|'INFO'|'WARN'|'ERROR'|'FATAL' (minimum level for console)
+# ----------------------------------------------
+
+sub configure_logger {
+    my (%opts) = @_;
+    
+    $console_enabled   = $opts{console}       if exists $opts{console};
+    $file_log_level    = uc($opts{file_level})    if exists $opts{file_level};
+    $console_log_level = uc($opts{console_level}) if exists $opts{console_level};
+    
+    # Validate levels
+    $file_log_level    = 'DEBUG' unless exists $LEVEL_PRIORITY{$file_log_level};
+    $console_log_level = 'INFO'  unless exists $LEVEL_PRIORITY{$console_log_level};
+}
+
+# ----------------------------------------------
+# _level_value - Returns numeric priority for a log level
+# ----------------------------------------------
+
+sub _level_value {
+    my ($level) = @_;
+    return $LEVEL_PRIORITY{uc($level // 'INFO')} // $LEVEL_PRIORITY{INFO};
+}
+
+# ----------------------------------------------
 # log_header - Constructs a log header with timestamp, level, title, and message
 # ----------------------------------------------
 
 sub log_header {
     my ($level, $title, $message) = @_;
     my $log_msg = _construct_header($level, $title, $message);
-    _write_log($log_msg);
+    _write_log($log_msg, $level);
     return $log_msg;
 }
 
@@ -56,7 +98,7 @@ sub log_header {
 sub log_message {
     my ($level, $message) = @_;
     my $log_msg = _construct_log_message($level, $message);
-    _write_log($log_msg);
+    _write_log($log_msg, $level);
     return $log_msg;
 }
 
@@ -203,14 +245,25 @@ sub _construct_log_message {
 # ----------------------------------------------
 
 sub _write_log {
-    my ($log_msg) = @_;
+    my ($log_msg, $level) = @_;
     return unless defined $log_msg;
-
-    if (defined $log_file) {
+    
+    $level //= 'INFO';
+    my $msg_priority = _level_value($level);
+    
+    # Write to file if log file is set and level meets threshold
+    if (defined $log_file && $msg_priority >= _level_value($file_log_level)) {
         open my $fh, '>>', $log_file or die "Could not open log file '$log_file': $!";
         print $fh $log_msg;
         close $fh;
-    } else {
+    }
+    
+    # Write to console if enabled and level meets threshold
+    # Also write to console if no log file is set (original behavior)
+    if ($console_enabled && $msg_priority >= _level_value($console_log_level)) {
+        print $log_msg;
+    } elsif (!defined $log_file) {
+        # Fallback: if no log file and console disabled, still print (avoid silent failure)
         print $log_msg;
     }
 }
