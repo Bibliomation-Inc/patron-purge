@@ -36,7 +36,8 @@ patron_base AS (
         patron.id AS patron_id,
         patron.home_ou,
         patron.expire_date,
-        org_unit.shortname AS library_shortname
+        org_unit.shortname AS library_shortname,
+        perm_group.name AS permission_group
     FROM actor.usr AS patron
     JOIN permission.grp_tree AS perm_group ON patron.profile = perm_group.id
     JOIN actor.org_unit AS org_unit ON patron.home_ou = org_unit.id
@@ -57,7 +58,8 @@ expired_patrons AS (
         patron_base.patron_id,
         patron_base.home_ou,
         patron_base.expire_date,
-        patron_base.library_shortname
+        patron_base.library_shortname,
+        patron_base.permission_group
     FROM patron_base
     CROSS JOIN config
     WHERE patron_base.expire_date < (NOW() - config.expiration_threshold)
@@ -69,7 +71,8 @@ purge_eligible AS (
         expired_patrons.patron_id,
         expired_patrons.home_ou,
         expired_patrons.expire_date,
-        expired_patrons.library_shortname
+        expired_patrons.library_shortname,
+        expired_patrons.permission_group
     FROM expired_patrons
     CROSS JOIN config
     
@@ -115,6 +118,7 @@ purge_eligible AS (
 SELECT 
     purge_eligible.patron_id,
     purge_eligible.library_shortname,
+    purge_eligible.permission_group,
     purge_eligible.expire_date,
     EXTRACT(YEAR FROM AGE(NOW(), purge_eligible.expire_date))::INT AS years_expired
 FROM purge_eligible
