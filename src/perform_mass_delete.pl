@@ -141,6 +141,7 @@ sub initialize_database {
 sub find_eligible_patrons {
     my $eligible_patrons;
     try {
+        log_message(INFO, "Finding patrons eligible for deletion...");
         my $sql_file = "$RealBin/sql/find_purge_eligible_patrons.sql";
         $eligible_patrons = run_sql_file($sql_file);
         log_message(INFO, "Found " . scalar(@$eligible_patrons) . " patrons eligible for deletion");
