@@ -17,6 +17,7 @@ our @EXPORT_OK = qw(
     run_sql_file
     begin_transaction
     commit_transaction
+    rollback_transaction
     prepare_sql
     execute_prepared
 );
@@ -143,6 +144,12 @@ sub begin_transaction {
 sub commit_transaction {
     die "No database connection established\n" unless defined $database_handle;
     $database_handle->commit();
+    $database_handle->{AutoCommit} = 1;
+}
+
+sub rollback_transaction {
+    die "No database connection established\n" unless defined $database_handle;
+    $database_handle->rollback();
     $database_handle->{AutoCommit} = 1;
 }
 

@@ -20,7 +20,7 @@ use Getopt::Long;
 use POSIX qw(strftime);
 
 use ConfigFile qw(load_config);
-use Database qw(setup_database_connection run_sql run_sql_file begin_transaction commit_transaction prepare_sql execute_prepared);
+use Database qw(setup_database_connection run_sql run_sql_file begin_transaction commit_transaction rollback_transaction prepare_sql execute_prepared);
 use Email qw(send_email);
 use Evergreen;
 use Logging qw(setup_logger configure_logger log_message log_header DEBUG INFO WARN ERROR FATAL);
@@ -232,13 +232,18 @@ sub purge_patrons_parallel {
     my $total = scalar(@$patrons);
     log_message(INFO, "Starting parallel purge with $workers workers for $total patrons");
     
-    # Split patron list into slices for each worker
+    # Split patron list into contiguous slices for each worker
+    # (patrons are sorted by library, so contiguous slices minimize
+    # cross-worker overlap on shared circulation data)
     my @slices;
+    my $slice_size = int($total / $workers);
+    my $remainder  = $total % $workers;
+    my $offset     = 0;
+    
     for my $i (0 .. $workers - 1) {
-        $slices[$i] = [];
-    }
-    for my $i (0 .. $#$patrons) {
-        push @{ $slices[$i % $workers] }, $patrons->[$i];
+        my $count = $slice_size + ($i < $remainder ? 1 : 0);
+        $slices[$i] = [ @{$patrons}[$offset .. $offset + $count - 1] ];
+        $offset += $count;
     }
     
     # Create a temp file per worker to report results back
@@ -291,6 +296,14 @@ sub purge_patrons_parallel {
                 catch {
                     log_message(ERROR, "Worker $worker_id: failed to purge patron $patron_id: $_");
                     $errors++;
+                    
+                    # Recover from aborted transaction (e.g. deadlock)
+                    try {
+                        rollback_transaction();
+                    } catch {};
+                    $batch_count = 0;
+                    $sth = prepare_sql("SELECT actor.usr_delete(?, ?)");
+                    begin_transaction();
                 };
             }
             
