@@ -20,7 +20,7 @@ use Getopt::Long;
 use POSIX qw(strftime);
 
 use ConfigFile qw(load_config);
-use Database qw(setup_database_connection run_sql run_sql_file);
+use Database qw(setup_database_connection run_sql run_sql_file begin_transaction commit_transaction prepare_sql execute_prepared);
 use Email qw(send_email);
 use Evergreen;
 use Logging qw(setup_logger configure_logger log_message log_header DEBUG INFO WARN ERROR FATAL);
@@ -36,6 +36,7 @@ my $dry_run        = 0;
 my $quiet          = 0;
 my $dest_user_id   = 1;  # Default destination user for reassigning data
 my $help           = 0;
+my $batch_size     = 1000;  # Number of patrons per transaction batch
 
 # Email settings
 my $email_enabled        = 0;
@@ -51,6 +52,7 @@ GetOptions(
     'quiet'         => \$quiet,
     'dest-user=i'   => \$dest_user_id,
     'email-to=s'    => \$email_to,
+    'batch-size=i'  => \$batch_size,
     'help'          => \$help,
 ) or die "Error in command line arguments\n";
 
@@ -71,7 +73,8 @@ sub main {
     configure_logger(console => 0) if $quiet;
     
     log_header(INFO, 'Patron Purge Started', 
-        "Config: $config_file | Dry Run: " . ($dry_run ? 'Yes' : 'No') . " | Dest User: $dest_user_id");
+        "Config: $config_file | Dry Run: " . ($dry_run ? 'Yes' : 'No') . " | Dest User: $dest_user_id" .
+        " | Batch Size: $batch_size");
     
     initialize_database();
     
@@ -162,6 +165,13 @@ sub purge_patrons {
     
     my $success_count = 0;
     my $error_count   = 0;
+    my $batch_count   = 0;
+    my $total         = scalar(@$patrons);
+    
+    # Prepare the statement once, execute many times
+    my $sth = prepare_sql("SELECT actor.usr_delete(?, ?)") unless $dry_run;
+    
+    begin_transaction() unless $dry_run;
     
     for my $patron (@$patrons) {
         my $patron_id     = $patron->{patron_id};
@@ -175,14 +185,28 @@ sub purge_patrons {
         }
         
         try {
-            run_sql("SELECT actor.usr_delete(?, ?)", $patron_id, $dest_user_id);
-            log_message(INFO, "Purged patron $patron_id ($library, expired $years_expired years)");
+            execute_prepared($sth, $patron_id, $dest_user_id);
             $success_count++;
+            $batch_count++;
+            
+            # Commit and start new transaction at batch boundaries
+            if ($batch_count >= $batch_size) {
+                commit_transaction();
+                log_message(INFO, "Committed batch ($success_count/$total purged so far)");
+                $batch_count = 0;
+                begin_transaction();
+            }
         }
         catch {
             log_message(ERROR, "Failed to purge patron $patron_id: $_");
             $error_count++;
         };
+    }
+    
+    # Commit any remaining
+    if (!$dry_run && $batch_count > 0) {
+        commit_transaction();
+        log_message(INFO, "Committed final batch ($success_count/$total purged)");
     }
     
     return ($success_count, $error_count);
@@ -257,9 +281,14 @@ Options:
     --dry-run           Show what would be purged without making changes
     --quiet             Suppress console output (for cron jobs)
     --dest-user=ID      User ID to reassign data to (default: 1)
+    --batch-size=N      Number of patrons per transaction batch (default: 1000)
     --notify-conf=FILE  Path to email notification config file
     --email-to=ADDR     Override email recipient from config
     --help              Show this help message
+
+Performance:
+    The --batch-size option controls how many patrons are purged per
+    transaction. Larger batches are faster but use more memory.
 
 Notification Config:
     Use --notify-conf to specify an email notification config file.
@@ -269,6 +298,9 @@ Notification Config:
 Examples:
     # Basic dry run
     purge_deleted_patrons.pl --dry-run
+
+    # Run with larger batch size for speed
+    purge_deleted_patrons.pl --batch-size=5000 --log=/var/log/patron_purge.log
 
     # Run with logging and notifications
     purge_deleted_patrons.pl --log=/var/log/patron_purge.log --notify-conf=/etc/notify.conf

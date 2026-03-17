@@ -71,9 +71,14 @@ purge_deleted_patrons.pl [OPTIONS]
 | `--dry-run` | Show what would be purged without making changes |
 | `--quiet` | Suppress console output (for cron jobs) |
 | `--dest-user=ID` | User ID to reassign data to (default: 1) |
+| `--batch-size=N` | Number of patrons per transaction batch (default: 1000) |
 | `--notify-conf=FILE` | Path to email notification config file |
 | `--email-to=ADDR` | Override email recipient from config |
 | `--help` | Show help message |
+
+**Performance:**
+
+The `--batch-size` option controls how many patrons are purged per transaction. Larger batches are faster but use more memory. The statement is also prepared once and reused for all patrons, avoiding repeated query parsing overhead.
 
 **Examples:**
 
@@ -83,6 +88,9 @@ purge_deleted_patrons.pl [OPTIONS]
 
 # Run with logging
 ./purge_deleted_patrons.pl --log=/var/log/patron_purge.log
+
+# Run with larger batch size for speed
+./purge_deleted_patrons.pl --batch-size=5000 --log=/var/log/patron_purge.log
 
 # Run with logging and email notifications
 ./purge_deleted_patrons.pl --log=/var/log/patron_purge.log --notify-conf=/etc/patron_purge/notify.conf

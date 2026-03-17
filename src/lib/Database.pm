@@ -15,6 +15,10 @@ our @EXPORT_OK = qw(
     create_schema_if_not_exists
     run_sql
     run_sql_file
+    begin_transaction
+    commit_transaction
+    prepare_sql
+    execute_prepared
 );
 
 my $database_handle = undef;
@@ -102,6 +106,44 @@ sub run_sql_file {
     $sql =~ s/\s+$//;
     
     return run_sql($sql, @params);
+}
+
+# ----------------------------------------------
+# prepare_sql - prepare a statement for repeated execution
+# Returns: DBI statement handle
+# ----------------------------------------------
+
+sub prepare_sql {
+    my ($sql) = @_;
+    die "No database connection established\n" unless defined $database_handle;
+    return $database_handle->prepare($sql);
+}
+
+# ----------------------------------------------
+# execute_prepared - execute a previously prepared statement handle
+# Arguments:
+#   $sth    - prepared statement handle
+#   @params - bind parameters
+# ----------------------------------------------
+
+sub execute_prepared {
+    my ($sth, @params) = @_;
+    $sth->execute(@params);
+}
+
+# ----------------------------------------------
+# begin_transaction / commit_transaction - manual transaction control
+# ----------------------------------------------
+
+sub begin_transaction {
+    die "No database connection established\n" unless defined $database_handle;
+    $database_handle->{AutoCommit} = 0;
+}
+
+sub commit_transaction {
+    die "No database connection established\n" unless defined $database_handle;
+    $database_handle->commit();
+    $database_handle->{AutoCommit} = 1;
 }
 
 # ----------------------------------------------
