@@ -37,6 +37,7 @@ my $quiet          = 0;
 my $dest_user_id   = 1;  # Default destination user for reassigning data
 my $help           = 0;
 my $batch_size     = 1000;  # Number of patrons per transaction batch
+my $workers        = 1;     # Number of parallel worker processes
 
 # Email settings
 my $email_enabled        = 0;
@@ -53,6 +54,7 @@ GetOptions(
     'dest-user=i'   => \$dest_user_id,
     'email-to=s'    => \$email_to,
     'batch-size=i'  => \$batch_size,
+    'workers=i'     => \$workers,
     'help'          => \$help,
 ) or die "Error in command line arguments\n";
 
@@ -74,7 +76,7 @@ sub main {
     
     log_header(INFO, 'Patron Purge Started', 
         "Config: $config_file | Dry Run: " . ($dry_run ? 'Yes' : 'No') . " | Dest User: $dest_user_id" .
-        " | Batch Size: $batch_size");
+        " | Batch Size: $batch_size | Workers: $workers");
     
     initialize_database();
     
@@ -86,7 +88,13 @@ sub main {
         return 0;
     }
     
-    my ($success_count, $error_count) = purge_patrons($deleted_patrons);
+    my ($success_count, $error_count);
+    
+    if ($workers > 1 && !$dry_run) {
+        ($success_count, $error_count) = purge_patrons_parallel($deleted_patrons);
+    } else {
+        ($success_count, $error_count) = purge_patrons($deleted_patrons);
+    }
     
     log_header(INFO, 'Patron Purge Complete', 
         "Success: $success_count | Errors: $error_count | Dry Run: " . ($dry_run ? 'Yes' : 'No'));
@@ -213,6 +221,127 @@ sub purge_patrons {
 }
 
 # ----------------------------------------------
+# purge_patrons_parallel - Fork worker processes to purge in parallel
+# Each worker gets its own database connection and processes a slice of the list.
+# Returns: ($success_count, $error_count)
+# ----------------------------------------------
+
+sub purge_patrons_parallel {
+    my ($patrons) = @_;
+    
+    my $total = scalar(@$patrons);
+    log_message(INFO, "Starting parallel purge with $workers workers for $total patrons");
+    
+    # Split patron list into slices for each worker
+    my @slices;
+    for my $i (0 .. $workers - 1) {
+        $slices[$i] = [];
+    }
+    for my $i (0 .. $#$patrons) {
+        push @{ $slices[$i % $workers] }, $patrons->[$i];
+    }
+    
+    # Create a temp file per worker to report results back
+    my @result_files;
+    for my $i (0 .. $workers - 1) {
+        my $file = "/tmp/patron_purge_worker_${$}_${i}.result";
+        push @result_files, $file;
+    }
+    
+    # Fork workers
+    my @child_pids;
+    my $db_config = Evergreen::get_database_configuration($config_file);
+    
+    for my $worker_id (0 .. $workers - 1) {
+        my $pid = fork();
+        
+        if (!defined $pid) {
+            log_message(FATAL, "Failed to fork worker $worker_id: $!");
+            exit 1;
+        }
+        
+        if ($pid == 0) {
+            # Child process - establish own database connection
+            setup_database_connection($db_config);
+            
+            my $slice = $slices[$worker_id];
+            my $slice_size = scalar(@$slice);
+            my $success = 0;
+            my $errors  = 0;
+            my $batch_count = 0;
+            
+            my $sth = prepare_sql("SELECT actor.usr_delete(?, ?)");
+            begin_transaction();
+            
+            for my $patron (@$slice) {
+                my $patron_id = $patron->{patron_id};
+                
+                try {
+                    execute_prepared($sth, $patron_id, $dest_user_id);
+                    $success++;
+                    $batch_count++;
+                    
+                    if ($batch_count >= $batch_size) {
+                        commit_transaction();
+                        log_message(INFO, "Worker $worker_id: committed batch ($success/$slice_size purged)");
+                        $batch_count = 0;
+                        begin_transaction();
+                    }
+                }
+                catch {
+                    log_message(ERROR, "Worker $worker_id: failed to purge patron $patron_id: $_");
+                    $errors++;
+                };
+            }
+            
+            if ($batch_count > 0) {
+                commit_transaction();
+                log_message(INFO, "Worker $worker_id: committed final batch ($success/$slice_size purged)");
+            }
+            
+            # Write results to temp file
+            open my $fh, '>', $result_files[$worker_id];
+            print $fh "$success $errors\n";
+            close $fh;
+            
+            exit 0;
+        }
+        
+        push @child_pids, $pid;
+        log_message(INFO, "Forked worker $worker_id (PID $pid) with " . scalar(@{$slices[$worker_id]}) . " patrons");
+    }
+    
+    # Parent: wait for all children
+    for my $pid (@child_pids) {
+        waitpid($pid, 0);
+        if ($? != 0) {
+            log_message(WARN, "Worker PID $pid exited with status $?");
+        }
+    }
+    
+    # Collect results from temp files
+    my $total_success = 0;
+    my $total_errors  = 0;
+    
+    for my $i (0 .. $workers - 1) {
+        if (open my $fh, '<', $result_files[$i]) {
+            my $line = <$fh>;
+            close $fh;
+            if ($line && $line =~ /^(\d+)\s+(\d+)/) {
+                $total_success += $1;
+                $total_errors  += $2;
+            }
+            unlink $result_files[$i];
+        } else {
+            log_message(WARN, "Could not read results for worker $i");
+            $total_errors++;
+        }
+    }
+    
+    return ($total_success, $total_errors);
+}
+
+# ----------------------------------------------
 # send_notification - Send email summary if enabled
 # ----------------------------------------------
 
@@ -282,6 +411,7 @@ Options:
     --quiet             Suppress console output (for cron jobs)
     --dest-user=ID      User ID to reassign data to (default: 1)
     --batch-size=N      Number of patrons per transaction batch (default: 1000)
+    --workers=N         Number of parallel worker processes (default: 1)
     --notify-conf=FILE  Path to email notification config file
     --email-to=ADDR     Override email recipient from config
     --help              Show this help message
@@ -289,6 +419,11 @@ Options:
 Performance:
     The --batch-size option controls how many patrons are purged per
     transaction. Larger batches are faster but use more memory.
+
+    Use --workers=N to run N parallel processes, each with its own
+    database connection. This scales nearly linearly — e.g. --workers=4
+    should be roughly 4x faster. Start conservatively to avoid
+    overloading the database server.
 
 Notification Config:
     Use --notify-conf to specify an email notification config file.
@@ -301,6 +436,9 @@ Examples:
 
     # Run with larger batch size for speed
     purge_deleted_patrons.pl --batch-size=5000 --log=/var/log/patron_purge.log
+
+    # Run with 4 parallel workers
+    purge_deleted_patrons.pl --workers=4 --log=/var/log/patron_purge.log
 
     # Run with logging and notifications
     purge_deleted_patrons.pl --log=/var/log/patron_purge.log --notify-conf=/etc/notify.conf
