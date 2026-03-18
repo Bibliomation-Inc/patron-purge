@@ -88,6 +88,30 @@ sub main {
         return 0;
     }
     
+    # Filter out patrons with shared addresses that would cause FK violations
+    my $shared_address_ids = find_shared_address_patrons();
+    my $skipped_count = 0;
+    
+    if (scalar(keys %$shared_address_ids) > 0) {
+        my @filtered;
+        for my $patron (@$deleted_patrons) {
+            if ($shared_address_ids->{$patron->{patron_id}}) {
+                log_message(WARN, "Skipping patron $patron->{patron_id} ($patron->{library_shortname}): shared address conflict");
+                $skipped_count++;
+            } else {
+                push @filtered, $patron;
+            }
+        }
+        $deleted_patrons = \@filtered;
+        log_message(INFO, "Excluded $skipped_count patrons with shared addresses, " . scalar(@$deleted_patrons) . " remaining");
+    }
+    
+    if (scalar(@$deleted_patrons) == 0) {
+        log_message(INFO, "No patrons remaining after filtering. Exiting.");
+        send_notification(0, 0, 0);
+        return 0;
+    }
+    
     my ($success_count, $error_count);
     
     if ($workers > 1 && !$dry_run) {
@@ -161,6 +185,29 @@ sub find_deleted_patrons {
     };
     
     return $deleted_patrons;
+}
+
+# ----------------------------------------------
+# find_shared_address_patrons - Find patrons whose addresses are referenced by other users
+# Returns: hashref of patron_id => 1 for patrons that should be skipped
+# ----------------------------------------------
+
+sub find_shared_address_patrons {
+    my %shared_ids;
+    try {
+        my $sql_file = "$RealBin/sql/find_shared_address_patrons.sql";
+        my $results = run_sql_file($sql_file);
+        for my $row (@$results) {
+            $shared_ids{$row->{patron_id}} = 1;
+        }
+        log_message(INFO, "Found " . scalar(keys %shared_ids) . " patrons with shared address conflicts");
+    }
+    catch {
+        log_message(FATAL, "Failed to find shared address patrons: $_");
+        exit 1;
+    };
+    
+    return \%shared_ids;
 }
 
 # ----------------------------------------------
